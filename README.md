@@ -1,43 +1,97 @@
-# Data Visualization and Reproducible Research
+# Data Visualization Final Project
+**Author:** Wesley Cutler
+**Date:** June 2026
 
-> Firstname Lastname. 
+---
 
+## Executive Summary
 
-The following is a sample of products created during the _"Data Visualization and Reproducible Research"_ course.
+This repository contains three data visualization projects completed for the Data Visualization course. Each project explores a different dataset and applies progressively advanced analytical techniques.
 
+**Project 1** analyzes the 2017 Boston Marathon to understand how age and gender influence finish times. Men finish significantly faster (Δ = 29 minutes, p < 0.001), and finish times increase progressively with age—a 94-minute gap from the youngest to oldest runners.
 
-## Project 01
+**Project 2** explores the West Roxbury housing market to identify what factors drive home values. Recent remodels command a 43% premium ($672k vs. $469k), and living area shows diminishing returns beyond 2,500 sq ft. The linear model explains 72% of the variance in home values.
 
-In the `project_01/` folder you can find... _[add short description of your revised project here]_
+**Project 3** extends the housing analysis with spatial data, revealing that homes within 500m of a T-station command a $98,000 premium and proximity to a park adds $42,000 in value. Geographically Weighted Regression explains 89% of the variance—up from 72% with the baseline model.
 
-**Sample data visualization:** 
+---
 
-_[include your favorite visualization from this project here]_
-<img src="https://raw.githubusercontent.com/aalhamadani/dataviz_final_project/main/figures/echarts.png" width="70%" height="70%">
+## Project 01: Boston Marathon Analysis
+**Theme:** Age and gender influence finish times in the 2017 Boston Marathon
 
+**Key Findings:**
+- Men finish significantly faster than women (Δ = 29 minutes, p < 0.001)
+- Finish times increase progressively with age (94-minute gap from 18–29 to 70+)
+- The gender gap narrows after age 60
+- Variability increases with age
 
-## Project 02
+**My Favorite Chart:** The **Raincloud Plot** combines a half-violin (density shape), boxplot (summary statistics), and jittered points (every runner) into one graphic. It reveals skewness, multimodality, and individual spread better than any single chart type.
 
-In this project, I explored ... _[short description of your revised project goes here]_ Find the code and report in the `project_02/` folder.
+**Techniques Used:** t-test, ANOVA, Tukey HSD, two-way ANOVA, LOESS smoothing, hexbin heatmap, raincloud plot
 
-**Sample data visualization:** 
+**[View Project 1](./project_01/)**
 
-_[include your favorite visualization from this project here]_
-<img src="https://raw.githubusercontent.com/aalhamadani/dataviz_final_project/main/figures/fl_higher_ed.png" width="80%" height="80%">
+---
 
-(you can place your figures in the `figures/` folder and use the `![](path_to_picture)` option to add the pictures here)
+## Project 02: West Roxbury Housing Analysis
+**Theme:** What factors drive home values in West Roxbury, MA?
 
+**Key Findings:**
+- Recent remodels command a **43% premium** ($672k vs. $469k)
+- Living area shows **diminishing returns** beyond 2,500 sq ft
+- Older homes lose approximately **0.3% value per year**
+- The linear model explains **72% of variance** (Adjusted R² = 0.72)
 
-## Project 03
+**My Favorite Chart:** The **Scatter + LOESS** plot shows every property as a point with a smooth trend line, revealing the critical inflection point at 2,500 sq ft where returns flatten. The color coding by remodel status shows that renovation adds value at every size level.
 
-In this project, I explored ... _[short description of the data visualizations you for this part of the project produced goes here]_
+**Techniques Used:** ANOVA, Tukey HSD, Levene's test, Kruskal-Wallis, linear regression, VIF, Breusch-Pagan test, interactive Plotly visualization, spatial mapping
 
-**Sample data visualization:** 
+**[View Project 2](./project_02/)**
 
-_[include your favorite visualization from this project here]_
-<img src="https://raw.githubusercontent.com/aalhamadani/dataviz_final_project/main/figures/concrete_density.png" width="80%" height="80%">
+---
 
+## Project 03: The Geography of Value
+**Theme:** Unlocking West Roxbury's hidden premium with spatial analysis
 
-### Moving Forward
+**Key Findings:**
+- Homes within 500m of a T-station command a **$98,000 premium** (18% above average)
+- Proximity to a park adds **$42,000 in value**
+- Adding spatial features increases model R² from **0.72 to 0.81**
+- **GWR explains 89%** of value variance
 
-_Please add here a short reflection on what you learned and what you plan to continue exploring in terms of data visualization, data storytelling, reproducible research, and/or related topics._
+**My Favorite Chart:** The **Interactive Leaflet Map** allows users to explore individual properties, zoom into street corridors, hover over parcels to view exact valuations, and identify localized arbitrage opportunities. It transforms the "mosaic of micro-markets" concept from abstract to tangible.
+
+**Techniques Used:** OpenStreetMap API enrichment, distance computations, Geographically Weighted Regression (GWR), spatial lag models, Leaflet interactive mapping, bad chart redesign
+
+**[View Project 3](./project_03/)**
+
+---
+
+## Data Sources
+
+| Project | Dataset | Source |
+| :--- | :--- | :--- |
+| Project 01 | Marathon Results 2017 | Boston Athletic Association |
+| Project 02 | West Roxbury Property Data | City of Boston (2018) |
+| Project 03 | West Roxbury Property Data + OpenStreetMap | City of Boston (2018) + OSM Contributors (2026) |
+
+---
+
+## How to Reproduce
+
+1. Clone this repository
+2. Open each project's `.Rmd` file in RStudio
+3. Install required packages (see each project's README)
+4. Click **Knit** → **Knit to HTML**
+
+---
+
+## Required Packages
+
+```r
+install.packages(c(
+  "tidyverse", "janitor", "lubridate", "hexbin", "ggdist", "ggridges",
+  "plotly", "broom", "htmlwidgets", "viridis", "knitr", "kableExtra",
+  "sf", "tigris", "osmdata", "leaflet", "spdep", "GWmodel", "spatialreg",
+  "car", "e1071", "corrplot", "ggspatial", "lmtest", "gganimate", "gifski"
+))
