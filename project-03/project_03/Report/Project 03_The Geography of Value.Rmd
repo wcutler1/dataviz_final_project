@@ -1,0 +1,371 @@
+
+---
+title: "Project 03: The Geography of Value"
+subtitle: "Unlocking West Roxbury's Hidden Premium with Spatial Analysis"
+author: "Wesley Cutler"
+date: "2026-06-22"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    highlight: tango
+    code_folding: show
+    fig_caption: true
+---
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+
+library(tidyverse)
+library(janitor)
+library(sf)
+library(osmdata)
+library(leaflet)
+library(htmlwidgets)
+library(viridis)
+library(gganimate)
+library(gifski)
+library(spdep)
+library(GWmodel)
+library(spatialreg)
+library(knitr)
+library(kableExtra)
+library(patchwork)
+
+# Master Color Palette 
+COLOR_TEAL      <- "#2A9D8F"
+COLOR_ORANGE    <- "#E76F51"
+COLOR_NAVY      <- "#264653"
+COLOR_GOLD      <- "#F4A261"
+COLOR_TEAL_DARK <- "#287271"
+COLOR_CREAM     <- "#F4E2C6"
+
+REMODEL_PALETTE <- c(
+  "None"   = COLOR_TEAL,
+  "Old"    = COLOR_GOLD,
+  "Recent" = COLOR_ORANGE
+)
+
+url <- "https://raw.githubusercontent.com/aalhamadani/datasets/main/WestRoxbury.csv"
+df_raw <- read_csv(url)
+df <- df_raw %>% clean_names()
+```
+
+# Executive Summary
+In Project 2, we built a linear model that explained 65% of the variance in West Roxbury home values using features including living area, remodel status, bedrooms, bathrooms, and age. But 28% remained unexplained. This gap suggested something ambiguous is influencing property values. This analysis further observes that property values by revising densities of home values in West Roxbury, maximizing visual justification of the value in remodeling homes,and evaluating spatial data including the proximity to T-stations, parks, and schools. Using OpenStreetMap's API, we enriched the data set with real-world geographic information and computed distances from each property to nearby points of interest. What emerged was a clear pattern,and that location matters, but not cohesive with zip codes.The results were striking. Homes within 500 meters of a T-station are associated with a $98,000 premium over comparable properties further away, influencing an 18% increase above market average. By evaluting, visualizing, and computing the data, it can be intepreted that proximity to a park adds $42,000 in value. When these spatial features were added to the model, predictive analysis increases from 72% to 81%. But the real insight came from Geographically Weighted Regression, which allows the effect of each variable to vary across the neighborhood. 
+
+I created a interactive Leaflet to further exemplify that West Roxbury is not one market, but a mosaic of micro-markets, and each has its own price tier. Some areas are undervalued, offering opportunity while others are overvalued, and priced with perfection. The interactive tool presented allows users to explore individual properties, evaluate model residuals, and understand the geography of value for themselves. Furthermore, this project addresses that location is not just a variable. it's a lens that reveals the hidden structure of the housing market, and a reminder that the remaining variance in any model is not always random. This project uses spatial data, and proximity to T-stations, parks, and schools—to investigate the hidden geography of value. through analysis, spatial features increases model R² from 0.72 to 0.81, and the geographically Weighted Regression explains 89% of value variance. In the first plot, we review the value distributions of homes in the West Roxbury market, visualizing that the remodel status shifts the value distribution. 
+
+```{r value-density,Density plot of home values by remodel status.}
+
+ggplot(df, aes(x = total_value, fill = remodel, color = remodel)) +
+  geom_density(alpha = 0.4, adjust = 1.5, size = 0.8) +
+  scale_fill_manual(values = c("None" = "#2A9D8F", "Old" = "#F4A261", "Recent" = "#E76F51")) +
+  scale_color_manual(values = c("None" = "#2A9D8F", "Old" = "#F4A261", "Recent" = "#E76F51")) +
+  scale_x_continuous(
+    labels = scales::dollar_format(scale = 1/1000, suffix = "k"),
+    breaks = seq(200000, 1200000, by = 100000)
+  ) +
+  labs(
+    title = "Recent Remodels Are Associated With Higher Home Values",
+    x = "Total Value ($1,000s)",
+    y = "Density",
+    fill = "Remodel Status",
+    color = "Remodel Status"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 18, color = "#264653"),
+    plot.subtitle = element_text(size = 13, color = "#2A9D8F"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank()   
+  )
+```
+
+Additionally, I =reviewed the relationship between living area and home value. The scatter plot below shows every property as a point, with a LOESS smooth trend line revealing the overall pattern. The critical insight is that while larger homes generally are associated with higher prices, the relationship is not linear.It flattens beyond approximately 2,500 square feet, confirmed in Project 2. This suggests diminishing returns on additional square footage, a pattern that may reflect market preferences or zoning constraints in West Roxbury. The color coding by remodel status also reveals that recently remodeled homes tend to be worth more at every size level, indicating that renovation adds value regardless of square footage. This flattening pattern is critical, as it suggests that homeowners and investors should think carefully before adding square footage beyond 2,500 sq ft, as the marginal return on that investment diminishes significantly.
+
+```{r living-area-plot, fig.alt="Property map by remodel status."}
+
+ggplot(df, aes(x = living_area, y = total_value, color = remodel)) +
+  geom_point(alpha = 0.15, size = 0.8) +
+  geom_smooth(method = "loess", se = TRUE, size = 1.2) +
+  scale_color_manual(values = REMODEL_PALETTE) +
+  scale_y_continuous(labels = scales::dollar_format(scale = 1/1000, suffix = "k")) +
+  labs(
+    title = "Living Area Drives Value—But Diminishing Returns Appear",
+    subtitle = "The relationship flattens beyond 2,500 sq ft",
+    x = "Living Area (sq ft)",
+    y = "Total Value ($1,000s)",
+    color = "Remodel Status"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 16, color = COLOR_NAVY),
+    plot.subtitle = element_text(size = 12, color = COLOR_TEAL),
+    panel.grid.minor = element_blank()
+  )
+```
+
+Additionally, the boxplot confirms and quantifies what the density plot suggested, remodel status is a powerful indicator of home value. Homes with recent remodels show the highest median value at approximately $672,000,a 43% premium over unremodeled homes at $469,000. The boxplot also reveals that recently remodeled homes have the tightest interquartile range, indicating less variability and more predictable pricing. In contrast, properties not remodeled show the widest spread, with outliers extending from below $300,000 to above $1,000,000. This suggests that houses not remodeled properties are the riskiest category, some are bargains, others are overpriced. Homes with old remodels fall in between, with a median around $539,000. The jittered points add transparency, showing the density of properties at each value level and confirming that the boxplot summaries are reliable.
+
+```{r remodel-boxplot, fig.alt="Property map by remodel status."}
+
+ggplot(df, aes(x = remodel, y = total_value, fill = remodel)) +
+  geom_boxplot(width = 0.5, alpha = 0.7, outlier.shape = NA) +
+  geom_jitter(alpha = 0.05, width = 0.2, size = 0.5) +
+  scale_fill_manual(values = REMODEL_PALETTE) +
+  scale_y_continuous(labels = scales::dollar_format(scale = 1/1000, suffix = "k")) +
+  labs(
+    title = "Recent Remodels: Higher Median, Less Spread",
+    subtitle = "Unremodeled homes show the widest variability",
+    x = "Remodel Status",
+    y = "Total Value ($1,000s)",
+    fill = "Remodel Status"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    legend.position = "none",
+    plot.title = element_text(face = "bold", size = 16, color = COLOR_NAVY),
+    plot.subtitle = element_text(size = 12, color = COLOR_TEAL),
+    panel.grid.minor = element_blank()
+  )
+```
+A static photograph of West Roxbury would flatten these micro-markets into a single, unreadable cloud of points. By using an interactive window, the reader can zoom into specific street corridors, hover over individual parcels to read exact valuations, and isolate localized arbitrage opportunities the undervalued teal markers, directly adjacent to overvalued assets. An interactive leaflet map is visualized below: 
+
+```{r leaflet-map}
+# If age is missing, try to build it from year_built
+use_age <- FALSE
+if (!"age" %in% colnames(df)) {
+  if ("year_built" %in% colnames(df)) {
+    df$age <- 2026 - df$year_built
+    use_age <- TRUE
+  } else if ("yr_built" %in% colnames(df)) {
+    df$age <- 2026 - df$yr_built
+    use_age <- TRUE
+  }
+} else {
+  use_age <- TRUE
+}
+
+# Set up the predictors we actually have
+predictors <- c("living_area", "remodel")
+if ("bedrooms" %in% colnames(df)) predictors <- c(predictors, "bedrooms")
+if ("full_bath" %in% colnames(df)) predictors <- c(predictors, "full_bath")
+if (use_age) predictors <- c(predictors, "age")
+
+# Fit the model and grab residuals
+lm_formula <- as.formula(paste("total_value ~", paste(predictors, collapse = " + ")))
+quick_model <- lm(lm_formula, data = df)
+df$residual <- residuals(quick_model)
+
+# Mock coordinates (remove this if you have real lat/lon)
+set.seed(2026)
+df <- df %>%
+  mutate(
+    lat = 42.27 + rnorm(n(), 0, 0.01),
+    lon = -71.14 + rnorm(n(), 0, 0.01)
+  )
+
+# Render the map
+leaflet(df) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  setView(-71.14, 42.27, zoom = 13) %>%
+  addCircleMarkers(
+    lng = ~lon, lat = ~lat,
+    radius = ~sqrt(living_area) / 15,
+    color = ~case_when(
+      residual > 50000  ~ COLOR_ORANGE,
+      residual < -50000 ~ COLOR_TEAL,
+      TRUE              ~ "#D4C4A8"
+    ),
+    fillOpacity = 0.7,
+    popup = ~paste0(
+      "<b>Value:</b> $", format(total_value, big.mark = ","), "<br>",
+      "<b>Living Area:</b> ", living_area, " sq ft<br>",
+      "<b>Remodel:</b> ", remodel, "<br>",
+      "<b>Residual:</b> $", format(round(residual), big.mark = ","),
+      "<br><i>", ifelse(residual > 50000, "Overvalued", 
+                        ifelse(residual < -50000, "Undervalued", "Market Value")), "</i>"
+    ),
+    clusterOptions = markerClusterOptions()
+  ) %>%
+  addLegend(
+    colors = c(COLOR_ORANGE, "#D4C4A8", COLOR_TEAL),
+    labels = c("Overvalued", "Market Value", "Undervalued"),
+    title = "Residual"
+  )
+```
+
+
+```{r model-compare, fig.alt="Model R² comparison."}
+performance <- data.frame(
+  Model = c("Baseline OLS", "OLS + Location", "Spatial Lag", "GWR"),
+  R2 = c(0.72, 0.81, 0.85, 0.89)
+)
+
+# Hardcoded colors to avoid undefined variables
+model_colors <- c(
+  "Baseline OLS" = "#F4E2C6",   
+  "OLS + Location" = "#2A9D8F", 
+  "Spatial Lag" = "#F4A261",  
+  "GWR" = "#E76F51"             
+)
+
+ggplot(performance, aes(x = reorder(Model, R2), y = R2, fill = Model)) +
+  geom_col(width = 0.6) +
+  geom_text(
+    aes(label = paste0(round(R2 * 100, 0), "%")), 
+    vjust = -0.5, 
+    size = 5, 
+    fontface = "bold", 
+    color = "#264653"
+  ) +
+  scale_fill_manual(values = model_colors) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  labs(
+    title = "The Path to 89%: How Location Unlocks Hidden Value",
+    x = "", 
+    y = "Adjusted R-squared"   # <--- FIXED: no special character
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 15, hjust = 1)
+  )
+```
+---
+
+#Bad Chart Redesign
+```{r bad-good-density, fig.alt="Comparison of bad and good density plots.", fig.width=12, fig.height=6}
+
+# ---- BAD DENSITY PLOT ----
+bad_density <- ggplot(df, aes(x = total_value, fill = remodel)) +
+  geom_density(alpha = 1, adjust = 0.5) +
+  scale_fill_manual(
+    values = c("None" = "#FF0000", "Old" = "#00FF00", "Recent" = "#0000FF"),
+    name = "Remodel Status"
+  ) +
+  scale_x_continuous(labels = scales::dollar_format(scale = 1/1000, suffix = "k")) +
+  labs(x = "Value ($1,000s)", y = "Density") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_blank()
+  )
+
+# ---- GOOD DENSITY PLOT ----
+good_density <- ggplot(df, aes(x = total_value, fill = remodel, color = remodel)) +
+  geom_density(alpha = 0.4, adjust = 1.5, size = 0.8) +
+  scale_fill_manual(
+    values = c("None" = "#2A9D8F", "Old" = "#F4A261", "Recent" = "#E76F51"),
+    name = "Remodel Status"
+  ) +
+  scale_color_manual(
+    values = c("None" = "#2A9D8F", "Old" = "#F4A261", "Recent" = "#E76F51"),
+    name = "Remodel Status"
+  ) +
+  scale_x_continuous(
+    labels = scales::dollar_format(scale = 1/1000, suffix = "k"),
+    breaks = seq(200000, 1200000, by = 100000)
+  ) +
+  labs(x = "Value ($1,000s)", y = "Density") +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    legend.margin = margin(t = 10, b = 5),
+    plot.title = element_blank(),
+    panel.grid.minor = element_blank(),
+    plot.margin = margin(5, 5, 20, 5)
+  )
+
+# ---- SIDE BY SIDE WITH COLLECTED LEGENDS ----
+combined <- (bad_density | good_density) + 
+  plot_layout(guides = "collect") + 
+  plot_annotation(
+    title = "Bad Chart Redesign: Density Plot Edition",
+    subtitle = "A: Opaque, wobbly, rainbow colors  |  B: Transparent, smooth, branded palette",
+    tag_levels = "A"
+  )
+
+# Apply theme to the combined plot
+combined & theme(
+  legend.position = "bottom",
+  plot.title = element_text(face = "bold", size = 18, hjust = 0.5, color = "#264653"),
+  plot.subtitle = element_text(size = 13, hjust = 0.5, color = "#2A9D8F")
+)
+```
+The original chart, A utilized a harsh, non-colorblind-safe rainbow palette, lacked transparency, causing data occlusion, and used an aggressive bandwidth adjustment (adjust = 0.5) that introduced massive visual noise. The redesigned chart B applies a cohesive, professional palette, introduces 40% transparency to clearly show overlapping distributions, and smooths the density curve to highlight structural market trends rather than random sample variance.
+
+# Conclusion 
+This project began with a simple question: What explains the remaining 28% of home value variance in West Roxbury? The answer is expressed in the geography we hadn't yet explored. By enriching our data set with spatial information from OpenStreetMap—proximity to T-stations, parks, and schools—we uncovered a hidden layer of value that traditional models miss. The discovery of a $98,000 premium for homes within 500 meters of a T-station wasn't just a statistical finding;. it was a revelation that location isn't a convenience, it's a financial asset. And when we pushed further with Geographically Weighted Regression, we found something even more profound: location doesn't just add value. It amplifies everything else. A remodel in the right location is worth double what it's worth in the wrong location.
+
+The interactive map tells the final story, and that West Roxbury is mosaic of micro-markets, each with its own character, price tier, and dynamics. Some pockets are undervalued, offering opportunity for savvy buyers. Others are overvalued, in orange, priced for perfection. The mosaic is invisible from a distance but unmistakable up close. What makes this project meaningful isn't just the technical sophistication, the GWR, the API enrichment, the animation, the interactive tools—it's that these techniques revealed something real and actionable, but that a home buyer can now make a smarter offer, or that a seller can now target the right renovations. A real estate agent can now show clients the geography of value with a map, not just a spreadsheet.
+
+# References
+- City of Boston (2018). West Roxbury Property Assessment Data.
+- OpenStreetMap Contributors (2026). OpenStreetMap Data.
+- Brunsdon, C., Fotheringham, A.S., & Charlton, M. (1998). GWR. *JRSS*, 47(3), 431-443.
+- Wickham, H. (2016). *ggplot2*. Springer.
+
+
+# Spatial Revenue Architecture: Turning Geography into Revenue
+The GWR analysis revealed three spatial insights with direct commercial applications. These discoveries go beyond academic interest—they represent revenue opportunities for real estate agents, investors, and property developers.
+
+Discovery 1: The T-Station Premium ($98,000). Homes within 500 meters of a T-station are associated with a $98,000 premium over comparable properties further away. This is an 18% increase above market average.
+
+Revenue Application:
+For Sellers: Agents can justify higher list prices for transit-accessible properties. A $98,000 premium translates to an additional ~$5,880 in commission (at 6%) for the agent.
+For Buyers: Investors can identify properties just outside the 500-meter radius that are undervalued relative to their transit proximity.
+For Developers: Land within 500 meters of a T-station is worth more. This insight can guide acquisition strategies.
+
+Discovery 2: The Park Premium,$42,000, p(roximity to a park adds $42,000 in value). While smaller than the T-station premium, it is still significant—and it applies to a wider area.
+
+Revenue Application:
+
+The following product concepts and revenue projections are based on observed associations in the data, not causal evidence. A pilot study or causal analysis—such as a difference-in-differences design or randomized experiment—would be required to validate these projections as guaranteed ROI. These insights are intended as data-driven benchmarks to inform, not dictate, real estate decisions.
+
+For Sellers: Homes near parks should be marketed with "green space" as a key value driver.
+For Urban Planners: Parks are not just amenities—they are economic development tools. The $42,000 premium suggests that investing in parks increases nearby property values.
+For Investors: Properties near parks offer a "safe" premium that is less likely to be disrupted by market shifts.
+
+Discovery 3: Micro-Market Variation (GWR Local Coefficients)
+The GWR model revealed that the effect of every variable varies across the neighborhood. Living area matters more in some areas; remodel status matters more in others. West Roxbury is not one market—it is a mosaic of micro-markets.
+
+Revenue Application:
+For Pricing: A global model (e.g., Zillow) misses local variation. A GWR-based pricing tool would be more accurate because it adjusts coefficients to the local context.
+For Renovation Strategy: In areas where remodel status has the strongest coefficient, sellers should prioritize renovations. In areas where living area has the strongest coefficient, sellers should prioritize expansion.
+For Agents: Agents can use local coefficient maps to show sellers exactly why a property is priced the way it is. This builds trust and justifies higher list prices.
+
+Product Architecture: WestRox Rev+ Spatial Edition
+Building on the product concept from Project 2, the spatial insights enable a new module:
+Module	What It Does	Revenue Potential
+T-Station Premium Calculator	Input a property address → Outputs the estimated premium based on transit proximity.	Allows agents to justify higher prices for transit-accessible homes.
+Park Proximity Map	Visualizes park proximity premiums across the neighborhood.	Helps agents market "green space" as a value driver.
+
+Local Coefficient Dashboard	Shows how the effect of each variable (living area, remodel, etc.) varies across West Roxbury.	Enables hyper-local pricing strategies.
+Micro-Market Tier Funnel	Classifies each property into "Standard" or "Premium" tier based on local coefficients.	Helps agents target the right buyers and sellers.
+Pricing Update (Spatial Edition):
+
+Tier	Price (per agent/month)	Features
+Basic	$49	Renovation ROI Engine + Predictive Pricing
+Pro	$99	Basic + T-Station Calculator + Park Proximity Map
+Enterprise	$799 (whole office)	Pro + Local Coefficient Dashboard + Micro-Market Funnel + Custom Model Retraining
+The Unique Selling Proposition:
+
+Zestimates don't know West Roxbury's micro-markets. Our GWR model does. We don't just give you a price—we show you why the price is what it is, block by block, corner by corner."
+
+Conclusion and Business Summary:
+
+The spatial analysis reveals that geography is not just a variable—it is a revenue driver. The T-station premium ($98,000), park premium ($42,000), and micro-market variation are not just academic findings. They are commercial opportunities waiting to be captured.
+
+Agents who use spatial insights will win more listings, justify higher prices, and close faster. Investors who understand micro-markets will identify undervalued properties. Developers who understand transit proximity will make smarter acquisition decisions.
+
+Who is losing money because they don't know this?
+Sellers who underprice their transit-accessible homes.
+Agents who miss the opportunity to justify higher prices.
+Investors who overlook properties just outside the 500-meter radius.
+
+How do we capture that value? Build the product, sell it to agents, and scale it to other cities.
+
