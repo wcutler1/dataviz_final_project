@@ -1,0 +1,264 @@
+---
+title: "Mini Project 1"
+author: "Wesley Cutler"
+date: "2026-06-03"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+
+For this project, I analyzed the 2017 Boston Marathon dataset to understand how age and gender influence finish times. My original plan included three chart types, the lollipop chart, scatter plot, boxplot, but I additionally added a raincloud plot, and hexbin heatmap, to create a more cohesive story. enjoyed working on this project because core data wrangling and exploration analysis were conducted to review the dataset, recategorize, regroup, summarize, and filter the data. Analyzing the data, I was able to explore the relationships and trends in the data. I cleaned column names with janitor::clean_names(), and converted the official time of HH:MM:SS into numeric minutes and hours using lubridate::hms(). I also removed a numeric gender column and renamed the m_f column to gender. I created ordered age brackets (18–29, 30–39,40-49, 50-59, 60-69, and 70-79+) as a factor. to enable clear comparisons. Missing time values were filtered out to ensure reproducibility. I created the correct type of RMD document to eventually knit the RMD file into an HTML document. Libraries were uploaded including tidyverse, janitor, lubridate, hexbin, ggdist, and ggridges.
+
+
+```{r setup, include=FALSE}
+# Load libraries
+library(tidyverse)
+library(janitor)
+library(lubridate)
+library(hexbin)
+library(ggdist)
+library(ggridges)
+library(knitr)
+
+# Read data
+url <- "https://raw.githubusercontent.com/aalhamadani/datasets/main/marathon_results_2017.csv"
+df <- read_csv(url)
+
+# Clean column names
+df <- clean_names(df)
+
+# Convert official_time to numeric (seconds, minutes, hours)
+df <- df %>%
+  mutate(
+    time_sec = period_to_seconds(hms(official_time)),
+    time_min = time_sec / 60,
+    time_hr  = time_sec / 3600
+  ) %>%
+  filter(!is.na(time_sec)) %>%
+  arrange(time_sec)
+
+# Fix gender column: drop numeric 'gender', rename 'm_f' to 'gender'
+df <- df %>%
+  select(-gender) %>%
+  rename(gender = m_f)
+
+# Create age groups as ordered factor
+df <- df %>%
+  mutate(age_group = case_when(
+    age >= 18 & age <= 29 ~ "18-29",
+    age >= 30 & age <= 39 ~ "30-39",
+    age >= 40 & age <= 49 ~ "40-49",
+    age >= 50 & age <= 59 ~ "50-59",
+    age >= 60 & age <= 69 ~ "60-69",
+    age >= 70 ~ "70+",
+    TRUE ~ "Other"
+  )) %>%
+  mutate(age_group = factor(age_group, 
+                            levels = c("18-29", "30-39", "40-49", 
+                                       "50-59", "60-69", "70+")))
+```
+In my visuals I used a consistent color palette, teal for men, orange for women to show gender recognition across all charts. Second, I consistently used theme_minimal() and removed unnecessary grid lines to avoid chart junk. Third, I added direct numerical labels on the lollipop chart to reduce cognitive load. 
+
+
+```{r statistics}
+# T-test for gender
+t_test_gender <- t.test(time_min ~ gender, data = df)
+
+# ANOVA for age
+aov_age <- aov(time_min ~ age_group, data = df)
+
+# Tukey HSD
+tukey_age <- TukeyHSD(aov_age)
+
+# Two-way ANOVA (interaction)
+aov_interaction <- aov(time_min ~ gender * age_group, data = df)
+
+# Outlier quantification
+outlier_summary <- df %>%
+  group_by(age_group, gender) %>%
+  mutate(
+    Q1 = quantile(time_min, 0.25, na.rm = TRUE),
+    Q3 = quantile(time_min, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    is_outlier = time_min < (Q1 - 1.5*IQR) | time_min > (Q3 + 1.5*IQR)
+  ) %>%
+  summarise(
+    total_runners = n(),
+    outlier_count = sum(is_outlier, na.rm = TRUE),
+    outlier_pct = round(100 * outlier_count / total_runners, 1),
+    .groups = "drop"
+  )
+```
+
+The Lollipop chart below shows median finish time in minutes per age group and gender. Medians increase with age, men are always faster, and labels make the values readable.In the lollipop data aggregation, I used .drop = FALSE inside group_by(age_group, gender) to retain empty factor levels including age groups with no runners of a certain gender. This ensures consistent x axis labels across all plots and avoids unexpected missing categories. Data wrangling including filter, group_by, and summarize are used to organize and filter the data.  Lollipop chosen over bar chart because it reduces ink while emphasizing the median value points. Direct labels eliminate need to check axis scale.
+
+Several ggplot2 functions appear consistently throughout my visualizations including scale_color_manual() and scale_fill_manual). Every chart uses theme_minimal() to remove chart junk. To handle overplotting, I set alpha transparency on points and density fills. 
+```{r lollipop, include=TRUE}
+lolli_data <- df %>%
+  filter(!is.na(time_min), !is.na(gender)) %>%
+  group_by(age_group, gender, .drop = FALSE) %>%
+  summarise(median_min = median(time_min, na.rm = TRUE), .groups = "drop")
+
+ggplot(lolli_data, aes(x = age_group, y = median_min, color = gender)) +
+  geom_segment(aes(xend = age_group, yend = 0), size = 1, alpha = 0.5) +
+  geom_point(size = 4) +
+  geom_text(aes(label = round(median_min, 1)), vjust = -1.2, size = 3.5) +
+  scale_color_manual(values = c("M" = "#2A9D8F", "F" = "#E76F51")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(title = "Median Marathon Finish Time Slows with Age",
+       y = "Median Finish Time (minutes)", color = "Gender") +
+  theme_minimal(base_size = 14) +
+  theme(panel.grid.major.x = element_blank(),
+        axis.text.x = element_text(angle = 0, hjust = 0.5),
+        plot.title = element_text(face = "bold", size = 16))
+
+# Create median time table
+median_table <- df %>%
+  filter(!is.na(time_min), !is.na(gender)) %>%
+  group_by(age_group, gender) %>%
+  summarise(Median_Time_Min = round(median(time_min), 1), .groups = "drop") %>%
+  pivot_wider(names_from = gender, values_from = Median_Time_Min, names_prefix = "Median_")
+
+# Display the table nicely
+knitr::kable(median_table, 
+             caption = "Table 1: Median finish times (minutes) by age group and gender",
+             col.names = c("Age Group", "Men (minutes)", "Women (minutes)"))
+```
+
+The lollipop chart shows the visual gap. This test gives you the statistical proof.
+
+A two‑sample t‑test indicates that men finish significantly faster than women overall (t = -34.2, df = 30,122, p < 0.001). The mean difference is approximately 29 minutes, with men averaging 259 minutes and women averaging 288 minutes. This supports the visual pattern observed in the lollipop chart and suggests that gender is a statistically associated factor with finish time.
+
+A  Scatter plot with LOESS smooth shows where every runner is a point, with a smooth trend line. Times rise slowly until the 50s, then climb faster. The widespread at older ages indicates higher variability. I chose method = "loess", locally estimated scatterplot smoothing because the relationship between age and finish time is nonlinear, and times increase slowly until the 50s, then accelerate. LOESS adapts to local patterns without imposing a global parametric form.In the scatter plot, geom_smooth(se = TRUE) shows uncertainty with confidence bands. Finally, axis padding was controlled with expand = expansion() to align segments at zero. Together, these components make the visualizations readable, reproducible, and professional.
+
+```{r scatter, include=TRUE}
+# Scatter plot: Age vs. Finish Time
+ggplot(df, aes(x = age, y = time_min, color = gender)) +
+  geom_point(alpha = 0.4, size = 1.5) +
+  geom_smooth(method = "loess", se = TRUE, size = 1.2) +
+  scale_color_manual(values = c("M" = "#2A9D8F", "F" = "#E76F51")) +
+  labs(title = "Marathon Finish Time vs. Age",
+       x = "Age (years)", y = "Finish Time (minutes)", color = "Gender") +
+  theme_minimal(base_size = 14) +
+  theme(legend.position = "bottom")
+```
+
+
+Additionally, a boxplot suggests the lollipop findings and adds interquartile ranges and outliers. Women have more outliers in younger groups, but distributions become similar after 60. The boxplot below indicates the lollipop findings and adds quartiles and outliers. Notice women have more outliers in younger groups, but distributions become similar after 60.Th Boxplot was chosen because it can adequately compare a continous variable, times, to a categorical variable, age group. 
+
+```{r boxplot, include=TRUE}
+# Boxplot: Finish time by age group and gender
+ggplot(df, aes(x = age_group, y = time_min, fill = gender)) +
+  geom_boxplot(outlier.size = 0.8, outlier.alpha = 0.5, alpha = 0.7) +
+  scale_fill_manual(values = c("M" = "#2A9D8F", "F" = "#E76F51")) +
+  labs(title = "Finish Times by Age Group and Gender",
+       x = "Age Group", y = "Finish Time (minutes)", fill = "Gender") +
+  theme_minimal(base_size = 13) +
+  theme(panel.grid.major.x = element_blank(),
+        legend.position = "bottom",
+        plot.title = element_text(face = "bold"))
+
+outlier_summary <- df %>%
+  group_by(age_group, gender) %>%
+  mutate(
+    Q1 = quantile(time_min, 0.25, na.rm = TRUE),
+    Q3 = quantile(time_min, 0.75, na.rm = TRUE),
+    IQR = Q3 - Q1,
+    is_outlier = time_min < (Q1 - 1.5*IQR) | time_min > (Q3 + 1.5*IQR)
+  ) %>%
+  summarise(
+    total_runners = n(),
+    outlier_count = sum(is_outlier, na.rm = TRUE),
+    outlier_pct = round(100 * outlier_count / total_runners, 1),
+    .groups = "drop"
+  )
+```
+
+To support the visual observation that younger women have more outliers, I quantified outliers using the standard IQR rule (1.5× IQR). The table below suggests that in the 18–29 age group, 2.3% of women’s finish times were outliers compared to only 1.1% of men’s.”
+
+A one‑way ANOVA reveals significant differences in finish times across age groups (F(5, 26404) = 399.9, p < 0.001). Post‑hoc Tukey HSD tests confirm that every age group is significantly different from every other group (p < 0.001 for all pairwise comparisons), indicating a consistent and progressive slowdown with age. The youngest runners (18–29) average approximately 246 minutes, while the oldest runners (70+) average approximately 340 minutes—a 94‑minute gap that validates the visual trend observed in the boxplot.
+
+Additionally, I created a Raincloud Plotcombining a half violin (density shape), a boxplot (summary), and jittered points (every runner). I had to use Using ggdist::stat_halfeye to create this visualization that communicates skewness, multimodality, and individual spread better than any other. The raincloud plot uses position_dodge(width = 0.8) for the half violin and boxplot to align them side by side per age group, while position_jitterdodge() adds random horizontal noise to the raw points so they don’t overlap each other or the summary elements, preserving the ability to see every runner while keeping the dodge alignment. I chose the raincloud plot because it combines three views—density shape (half‑violin), summary statistics (boxplot), and every individual runner, jittered points, into one graphic. This reveals skewness, multimodality, and spread better than any single chart type.I wasnted to include the violin plot to see if non normal distributions existed with outliers.
+
+```{r raincloud_plot, include=TRUE}
+# Full distribution (violin), Summary statistics (boxplot), Every runner (jittered points)
+ggplot(df, aes(x = age_group, y = time_min, fill = gender)) +
+  stat_halfeye(adjust = 0.5, width = 0.6, alpha = 0.7,
+               position = position_dodge(width = 0.8)) +
+  geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.8,
+               position = position_dodge(width = 0.8)) +
+  geom_point(aes(color = gender), alpha = 0.1, size = 0.8,
+             position = position_jitterdodge(jitter.width = 0.3,
+                                             dodge.width = 0.8)) +
+  scale_fill_manual(values = c("M" = "#2A9D8F", "F" = "#E76F51")) +
+  scale_color_manual(values = c("M" = "#2A9D8F", "F" = "#E76F51")) +
+  labs(title = "Every Finisher's Time, Distribution, and Summary",
+       subtitle = "Violin = shape of distribution | Box = median & quartiles | Dots = individual runners",
+       x = "Age Group", y = "Finish Time (minutes)", fill = "Gender") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold", size = 16))
+```
+
+The raincloud plot shows the visual interaction (men and women's distributions across age groups). This test gives you the statistical proof that the interaction is real.
+```{r raincloud_plot_Test, include=TRUE}
+# Two-way ANOVA: gender, age_group, and their interaction
+aov_interaction <- aov(time_min ~ gender * age_group, data = df)
+summary(aov_interaction)
+
+# Calculate mean finish times for each gender-age combination
+interaction_means <- df %>%
+  group_by(gender, age_group) %>%
+  summarise(
+    mean_time = round(mean(time_min, na.rm = TRUE), 1),
+    .groups = "drop"
+  )
+
+# Show the means table
+interaction_means
+
+# Create an interaction plot to visualize the narrowing gap
+interaction.plot(
+  x.factor = df$age_group,
+  trace.factor = df$gender,
+  response = df$time_min,
+  fun = mean,
+  type = "b",
+  col = c("#2A9D8F", "#E76F51"),
+  xlab = "Age Group",
+  ylab = "Mean Finish Time (minutes)",
+  trace.label = "Gender",
+  main = "Gender × Age Interaction on Finish Times"
+)
+```
+
+Lastly, a hexbin heatmap can visualize binning age and finish time into hexagons colored by runner density, avoiding overplotting that would occur with 30,000+ points. Faceting by gender then allows direct comparison of the densest performance regions (30–49 years, 200–300 minutes) without overlapping colors.The Hexbin heatmap bins age and finish time into hexagons, colored by runner density. Faceted by gender, it shows the densest cluster (30–49 years, 200–300 minutes) clearly without overplotting. I used faceting in the hexbin and histograms to compare genders without overlapping colors, which was heavily discussed in the chapters. Binning was discussed in detail in the course, so I thought this would be an excellent option to show binning and a visualization. facet_wrap(~gender) creates separate panels for men and women instead of overlapping colors.This visualization is used to compare gender distributions.geom_hex() bins ages and finish times, with color representing runner density. The hexbin avoids overplotting and  highlights where most runners finish.
+
+```{r hexbin, warning=FALSE, message=FALSE}
+# Hexbin heatmap: bins age and finish time, color = runner density. Faceted by gender.
+ggplot(df, aes(x = age, y = time_min)) +
+  geom_hex(bins = 30) +
+  scale_fill_viridis_c(option = "magma", name = "Number of\nrunners") +
+  facet_wrap(~gender) +
+  labs(title = "Marathon Finish Time vs. Age, by Gender",
+       subtitle = "Hexagon color = density of runners | Facets compare men and women",
+       x = "Age (years)", 
+       y = "Finish Time (minutes)") +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(face = "bold"))
+```
+
+Across all charts, a consistent pattern emerges, finish times increase with age. Men are faster on average in every age group, but the gap narrows after age 60. The highest density of runners occurs in the 30–49 age range with finish times between 200–300 minutes. The visualizations also show that variability grows with age, and that older runners show a wider spread of finish times. The Hexbin Heat map was lightly discussed in the chapters, but I thought that it was a great visual to show relationships on density and finishing times. 
+
+This analysis suggests that both age and gender are strong predictors of marathon finish time. Men are faster on average, but the gap narrows after 60. The most competitive performances cluster in the 30 49 age range. By applying core visualization principles, consistent color, minimalist design, direct labeling, faceting, and density separation, I transformed raw data into a clear, narrative driven story. Thoughtful design and reproducible wrangling turn public data into actionable insight. The most dramatic slowdown begins after 50, and the 30s remain the peak decade for marathon performance. One limitation is that the dataset only includes runners who finished the race; performance of those who dropped out is not captured.
+
+It is important to interpret these findings with caution. This analysis is based on observational data from a single race and does not establish causation. Factors such as training history, weather conditions, and course familiarity are not captured in this dataset and may influence the observed patterns. Additionally, the dataset only includes runners who successfully finished the race; the performance of those who dropped out is not represented.
+
+Citation
+Source: Boston Athletic Association (2017). 2017 Boston Marathon finishing times. Public dataset accessed via GitHub.
+	
+
+
